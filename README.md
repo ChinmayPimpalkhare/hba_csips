@@ -1,6 +1,3 @@
-Here’s a detailed `README.md` for your project based on the goals and structure you've shared:
-
----
 
 # Hierarchical Continuous Bandit Algorithms for Convex Semi-Infinite Programs
 
@@ -171,5 +168,3 @@ Please ensure your contributions include appropriate tests and documentation.
 This project is licensed under the MIT License. See the `LICENSE` file for more details.
 
 ---
-
-With this structure and detailed documentation, your repository will be well-organized, and contributors will have a clear understanding of the project's goals and how to get involved. Let me know if you’d like any adjustments!
