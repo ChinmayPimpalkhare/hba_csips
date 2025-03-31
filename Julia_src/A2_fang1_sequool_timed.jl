@@ -1,8 +1,19 @@
 using Convex, Random ,PProf ,Zygote ,BenchmarkTools ,Plots ,JuMP ,CSV ,DataFrames, Dates,Profile ,ProfileView ,MathOptInterface ,Clarabel ,Logging ,ForwardDiff ,PyFormattedStrings, DataStructures 
 Profile.Allocs.clear()
-optimizer = Convex.MOI.OptimizerWithAttributes(Clarabel.Optimizer, "verbose" => false, "max_iter" => 10)
+optimizer = Convex.MOI.OptimizerWithAttributes(Clarabel.Optimizer,
+    "tol_gap_abs" => 1e-2,          # Absolute duality gap tolerance (default: 1e-8)
+    "tol_gap_rel" => 1e-2,          # Relative duality gap tolerance (default: 1e-8)
+    "tol_feas" => 1e-3,             # Feasibility tolerance (default: 1e-8)
+    "max_iter" => 100,              # Maximum iterations (default: 200),
+    "equilibrate_enable" => false, 
+    "static_regularization_enable" => true, 
+    "iterative_refinement_enable" => true, 
+    "verbose" => true               # Enable logging for solver details
+)
 global_logger(ConsoleLogger(stderr, Logging.Error))
 timing_results = []
+
+
 
 function time_and_store(identifier, func)
     start_time = time_ns()
@@ -12,7 +23,6 @@ function time_and_store(identifier, func)
     push!(timing_results, Dict("Operation" => identifier, "Time (s)" => elapsed_time))
     return result
 end
-
 
 
 
@@ -26,6 +36,9 @@ function g_u_cvx(x_var, t)
     return sin(t[1]) + sum(-t[1]^(i-1) * x_var[i] for i in 1:50)
 end
 
+
+
+
 function get_x_fang1(u)
     n = 50
     x_var = Variable(n)
@@ -35,41 +48,62 @@ function get_x_fang1(u)
     constraints = [g_u_cvx(x_var, part) <= -1e-4 for part in u_parts]
     push!(constraints, -x_var <= 0.)
 
-    # Time the convex optimization step
+    # Solve convex optimization problem and capture output
     problem = minimize(objective, constraints)
-    time_and_store("1. Solving convex optimization", () -> solve!(problem, optimizer))
+    
+    open("solver_log.txt", "a") do io
+        println(io, "======================================")
+        println(io, "Solving at: ", now())
+        println(io, "======================================")
+
+        # Redirect stdout and stderr to log file
+        redirect_stdout(io) do
+            redirect_stderr(io) do
+                solve!(problem, optimizer)
+            end
+        end
+
+        println(io, "======================================\n")
+    end
 
     # Extract results
+    optimal_point = vec(evaluate(x_var))
     lagrange_multipliers_temp = [c.dual for c in constraints[1:n]]
     lagrange_multipliers = repeat(lagrange_multipliers_temp, inner = m)
-    optimal_point = vec(evaluate(x_var))
 
-    # Time gradient computation
-    grad_constraints = time_and_store("2. Computing gradient", () -> [
+    # Compute gradient
+    grad_constraints = [
         ForwardDiff.gradient(v -> g_u_cvx(optimal_point, v), part) for part in u_parts
-    ])
+    ]
     
     final_grad = vcat(grad_constraints...)
     return optimal_point, lagrange_multipliers, final_grad
 end
 
+
 # function get_x_fang1(u)
-#     #//[x] Change these for every problem 
 #     n = 50
 #     x_var = Variable(n)
 #     objective = sum(x_var ./ (1:length(x_var)))
 #     m = 1
 #     u_parts = [u[(i-1)*m+1:i*m] for i in 1:n]
 #     constraints = [g_u_cvx(x_var, part) <= -1e-4 for part in u_parts]
-#     push!(constraints,-x_var <= 0.)
-#     #// [ ] Keep these same for all  
+#     push!(constraints, -x_var <= 0.)
+
+#     # Time the convex optimization step
 #     problem = minimize(objective, constraints)
-#     solve!(problem, optimizer)
+#     time_and_store("1. Solving convex optimization", () -> solve!(problem, optimizer))
+
+#     # Extract results
 #     lagrange_multipliers_temp = [c.dual for c in constraints[1:n]]
 #     lagrange_multipliers = repeat(lagrange_multipliers_temp, inner = m)
-#     optimal_point = vec(evaluate(x_var)) 
-#     #// [x] Change the call to the gradient function in ForwardDiff 
-#     grad_constraints = [ForwardDiff.gradient(v -> g_u_cvx(optimal_point, v), part) for part in u_parts]
+#     optimal_point = vec(evaluate(x_var))
+
+#     # Time gradient computation
+#     grad_constraints = time_and_store("2. Computing gradient", () -> [
+#         ForwardDiff.gradient(v -> g_u_cvx(optimal_point, v), part) for part in u_parts
+#     ])
+    
 #     final_grad = vcat(grad_constraints...)
 #     return optimal_point, lagrange_multipliers, final_grad
 # end
@@ -352,7 +386,10 @@ end
 global low_domain = [0.1 for _ in 1:50]
 global up_domain  = [1.0 - 0.1*sqrt(pi) for _ in 1:50]
 global partition = Partition(low_domain, up_domain)
-global T = 200
+global T = 100
+open("solver_log.txt", "w") do io
+    close(io)  # Ensure file is emptied
+end
 node_stack_expand = @time run_algorithm_SequOOL!(partition, T)
 save_timing_results()
 best_node = plot_rewards(node_stack_expand)
